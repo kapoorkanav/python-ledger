@@ -16,13 +16,16 @@ def get_producer():
     return _producer
 
 def publish_transfer_completed(transfer_id, from_account_id, to_account_id, amount):
-    producer=get_producer()
-    event={
-        "event_type": "Transfer Completed",
-        "transfer_id": str(transfer_id),
-        "from_account_id": str(from_account_id),
-        "to_account_id": str(to_account_id),
-        "amount": amount,
-    }
-    producer.send("transfers.completed", value=event)
-    producer.flush()
+    try:
+        producer=get_producer()
+        event={
+            "event_type": "Transfer Completed",
+            "transfer_id": str(transfer_id),
+            "from_account_id": str(from_account_id),
+            "to_account_id": str(to_account_id),
+            "amount": amount,
+        }
+        producer.send("transfers.completed", value=event)
+        producer.flush()
+    except Exception as e:
+        print(f"Failed to publish kafka event {e}")

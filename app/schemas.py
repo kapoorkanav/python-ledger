@@ -1,5 +1,5 @@
 import uuid
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 class AccountCreate(BaseModel):
     name: str
@@ -15,7 +15,7 @@ class AccountOut(BaseModel):
         from_attributes=True
 
 class DepositRequest(BaseModel):
-    amount: int
+    amount: int=Field(gt=0)
     idempotency_key: str
     
 class DepositResponse(BaseModel):
@@ -23,7 +23,7 @@ class DepositResponse(BaseModel):
     balance: int
 
 class WithdrawalRequest(BaseModel):
-    amount: int
+    amount: int=Field(gt=0)
     idempotency_key: str
 
 class WithdrawalResponse(BaseModel):
@@ -33,5 +33,5 @@ class WithdrawalResponse(BaseModel):
 class TransferRequest(BaseModel):
     from_account_id: uuid.UUID
     to_account_id: uuid.UUID
-    amount: int
+    amount: int=Field(gt=0)
     idempotency_key: str

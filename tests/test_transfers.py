@@ -1,8 +1,11 @@
+import pytest
+
+@pytest.mark.integration
 def test_transfers_between_accounts(client):
     alice=client.post("/accounts", json={"name": "Alice"}).json()
     bob=client.post("/accounts", json={"name": "Bob"}).json()
 
-    client.post(f"/accounts/{alice["id"]}/deposit", json={"amount": 10000, "idempotency_key": "dep-001"})
+    client.post(f"/accounts/{alice['id']}/deposit", json={"amount": 10000, "idempotency_key": "dep-001"})
 
     response=client.post("/transfers", json={
         "from_account_id": alice['id'],
@@ -20,7 +23,7 @@ def test_transfer_with_insufficient_balance(client):
     alice=client.post("/accounts", json={"name": "Alice"}).json()
     bob=client.post("/accounts", json={"name": "Bob"}).json()
 
-    client.post(f"/accounts/{alice["id"]}/deposit", json={"amount": 1000, "idempotency_key": "dep-001"})
+    client.post(f"/accounts/{alice['id']}/deposit", json={"amount": 1000, "idempotency_key": "dep-001"})
 
     response=client.post("/transfers", json={
         "from_account_id": alice['id'],

@@ -1,9 +1,11 @@
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 import httpx
+import pytest
 
 BASE_URL="http://127.0.0.1:8000"
 
+@pytest.mark.integration
 def test_concurrent_withdrawals_never_overdraw():
     response=httpx.post(f"{BASE_URL}/accounts", json={"name": "ConcurrencyTest", "currency": "USD"})
     account_id=response.json()["id"]

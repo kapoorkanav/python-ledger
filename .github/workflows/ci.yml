@@ -8,7 +8,7 @@ on:
 
 jobs:
   test:
-    runs-on:ubuntu-latest
+    runs-on: ubuntu-latest
 
     services:
       postgres:
@@ -44,4 +44,46 @@ jobs:
       - name: Run tests
         env:
           DATABASE_URL: postgresql://ledger_user:ledger_pass@localhost:5432/ledger_db
-        run: pytest -v
+        run: pytest -v -m "not integration"
+
+  integration-test:
+    needs: test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Start full stack
+        run: docker compose up -d --build
+
+      - name: Wait for app to be ready
+        run: |
+          for i in {1..30}; do
+            if curl -fsS http://localhost:8000/ping; then
+              exit 0
+            fi
+            sleep 2
+          done          
+          echo "App did not become ready in time"
+          docker compose logs app
+          exit 1
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run integration tests
+        env:
+          DATABASE_URL: postgresql://ledger_user:ledger_pass@localhost:5432/ledger_db
+          BASE_URL: http://localhost:8000
+          KAFKA_BOOTSTRAP_SERVERS: localhost:9092
+        run: pytest -m integration -v
+
+      - name: Tear down
+        if: always()
+        run: docker compose down -v

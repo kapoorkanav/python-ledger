@@ -2,7 +2,8 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-
+import os
+os.environ["KAFKA_BOOTSTRAP_SERVERS"] = "localhost:9092"
 from app.main import app
 from app.database import Base, get_db
 
