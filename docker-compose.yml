@@ -28,6 +28,13 @@ services:
         condition: service_healthy
     command: >
       sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"
+
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health')\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
   kafka:
     image: confluentinc/cp-kafka:7.6.0
     environment:
@@ -52,6 +59,19 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+
+  outbox_relay:
+    build: .
+    environment:
+      DATABASE_URL: postgresql://ledger_user:ledger_pass@db:5432/ledger_db
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+    depends_on:
+      db:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    command: python -m app.outbox_relay
+    restart: unless-stopped
         
 volumes:
   pgdata:
