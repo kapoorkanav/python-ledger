@@ -10,9 +10,9 @@ from alembic import context
 config = context.config
 
 import os
-db_url = os.getenv("DATABASE_URL")
-if db_url:
-    config.set_main_option("sqlalchemy.url", db_url)
+
+db_url = os.getenv("DATABASE_URL", "postgresql://ledger_user:ledger_pass@localhost:5432/ledger_db")
+config.set_main_option("sqlalchemy.url", db_url)
 
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.
@@ -24,11 +24,10 @@ if config.config_file_name is not None:
 # from myapp import mymodel
 # target_metadata = mymodel.Base.metadata
 import sys
-import os
 sys.path.append(os.getcwd())
 
 from app.database import Base
-from app import models  # noqa
+from app import models  # Registers Account, LedgerEntry, Transfer, OutboxEvent
 
 target_metadata = Base.metadata
 
