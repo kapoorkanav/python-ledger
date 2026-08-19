@@ -1,35 +1,81 @@
 import pytest
 
-@pytest.mark.integration
-def test_transfers_between_accounts(client):
-    alice=client.post("/accounts", json={"name": "Alice"}).json()
-    bob=client.post("/accounts", json={"name": "Bob"}).json()
-
-    client.post(f"/accounts/{alice['id']}/deposit", json={"amount": 10000, "idempotency_key": "dep-001"})
-
-    response=client.post("/transfers", json={
-        "from_account_id": alice['id'],
-        "to_account_id": bob['id'],
-        "amount": 3000,
-        "idempotency_key": "tx-001",
+def _transfer(client, src, dst, amount, idem):
+    return client.post("/transfers", json={
+        "from_account_id": src["id"],
+        "to_account_id": dst["id"],
+        "amount": amount,
+        "idempotency_key": idem,
     })
-    
-    assert response.status_code==200
-    data=response.json()
-    assert data["from_balance"]==7000
-    assert data["to_balance"]==3000
 
-def test_transfer_with_insufficient_balance(client):
-    alice=client.post("/accounts", json={"name": "Alice"}).json()
-    bob=client.post("/accounts", json={"name": "Bob"}).json()
+def test_transfer_moves_money(client, account, key):
+    alice, bob = account("Alice"), account("Bob")
+    client.post(f"/accounts/{alice['id']}/deposit",
+                json={"amount": 10000, "idempotency_key": key("dep")})
 
-    client.post(f"/accounts/{alice['id']}/deposit", json={"amount": 1000, "idempotency_key": "dep-001"})
+    response = _transfer(client, alice, bob, 3000, key("tx"))
 
-    response=client.post("/transfers", json={
-        "from_account_id": alice['id'],
-        "to_account_id": bob['id'],
-        "amount": 3000,
-        "idempotency_key": "tx-001",
+    assert response.status_code == 200
+    assert response.json()["from_balance"] == 7000
+    assert response.json()["to_balance"] == 3000
+
+def test_transfer_is_idempotent(client, account, key):
+    alice, bob = account("Alice"), account("Bob")
+    client.post(f"/accounts/{alice['id']}/deposit",
+                json={"amount": 10000, "idempotency_key": key("dep")})
+    idem = key("tx")
+
+    first = _transfer(client, alice, bob, 3000, idem)
+    second = _transfer(client, alice, bob, 3000, idem)
+
+    assert first.status_code == second.status_code == 200
+    assert first.json() == second.json()
+    assert client.get(f"/accounts/{alice['id']}").json()["balance"] == 7000
+
+def test_transfer_key_reuse_with_different_amount_conflicts(client, account, key):
+    alice, bob = account("Alice"), account("Bob")
+    client.post(f"/accounts/{alice['id']}/deposit",
+                json={"amount": 10000, "idempotency_key": key("dep")})
+    idem = key("tx")
+
+    _transfer(client, alice, bob, 3000, idem)
+    response = _transfer(client, alice, bob, 4000, idem)
+
+    assert response.status_code == 409
+
+def test_transfer_insufficient_balance_leaves_balances_untouched(client, account, key):
+    alice, bob = account("Alice"), account("Bob")
+    client.post(f"/accounts/{alice['id']}/deposit",
+                json={"amount": 1000, "idempotency_key": key("dep")})
+
+    assert _transfer(client, alice, bob, 3000, key("tx")).status_code == 400
+    assert client.get(f"/accounts/{alice['id']}").json()["balance"] == 1000
+    assert client.get(f"/accounts/{bob['id']}").json()["balance"] == 0
+
+def test_transfer_to_same_account_rejected(client, account, key):
+    alice = account("Alice")
+    assert _transfer(client, alice, alice, 100, key("tx")).status_code == 400
+
+
+def test_transfer_to_unknown_account_rejected(client, account, key):
+    import uuid
+    alice = account("Alice")
+    response = client.post("/transfers", json={
+        "from_account_id": alice["id"],
+        "to_account_id": str(uuid.uuid4()),
+        "amount": 100,
+        "idempotency_key": key("tx"),
     })
-    
-    assert response.status_code==400
+    assert response.status_code == 404
+
+def test_transfer_across_currencies_rejected(client, account, key):
+    usd, eur = account("Alice", "USD"), account("Bruno", "EUR")
+    client.post(f"/accounts/{usd['id']}/deposit",
+                json={"amount": 10000, "idempotency_key": key("dep")})
+
+    assert _transfer(client, usd, eur, 1000, key("tx")).status_code == 400
+
+def test_transfer_rejects_non_positive_amount(client, account, key):
+    alice, bob = account("Alice"), account("Bob")
+    assert _transfer(client, alice, bob, 0, key("tx")).status_code == 422
+    assert _transfer(client, alice, bob, -100, key("tx")).status_code == 422

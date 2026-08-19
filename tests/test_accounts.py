@@ -19,3 +19,12 @@ def test_get_account(client):
     assert data["name"]=="Alice"
     assert data["currency"]=="USD"
     assert data["id"]==account_id
+
+def test_get_unknown_account_404(client):
+    import uuid
+    assert client.get(f"/accounts/{uuid.uuid4()}").status_code == 404
+
+
+def test_new_account_starts_at_zero(client, account):
+    acc = account("Alice")
+    assert client.get(f"/accounts/{acc['id']}").json()["balance"] == 0
