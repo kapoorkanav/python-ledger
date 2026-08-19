@@ -1,19 +1,27 @@
-from fastapi import FastAPI
-from app.routers import accounts
-from app.routers import transfers
-app=FastAPI()
+import logging
 
-app.include_router(accounts.router)
-app.include_router(transfers.router)
+from fastapi import Depends, FastAPI
+from sqlalchemy import text
+from sqlalchemy.orm import Session
 
-@app.get("/")
-def read_root():
-    return {"message": "hello, this is my ledger API"}
+from app.database import get_db
+from app.routers import accounts, transfers
 
-@app.get("/ping")
-def ping():
-    return {"status": "ok"}
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s %(message)s",
+)
 
-@app.get("/hello/{name}")
-def hello(name: str):
-    return {"message": f"hello, {name}"}
+app=FastAPI(
+    title="LEDGER_API",
+    description="Double entry ledger with transactional outbox event publishing",
+    version="1.0.0"
+)
+
+app.include_router(accounts.router, tags=["accounts"])
+app.include_router(transfers.router, tags=["transfers"])
+
+@app.get("/health", tags=["ops"])
+def health(db: Session=Depends(get_db)):
+    db.execute(text("SELECT 1"))
+    return {"status": "OK"}
