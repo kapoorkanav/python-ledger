@@ -21,6 +21,7 @@ services:
     environment:
       - DATABASE_URL=postgresql://ledger_user:ledger_pass@db:5432/ledger_db
       - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
+      - LEDGER_API_KEY=${LEDGER_API_KEY:-dev-secret-key}
     depends_on:
       db:
         condition: service_healthy

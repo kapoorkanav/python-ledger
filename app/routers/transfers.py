@@ -5,6 +5,8 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app import models, schemas, crud, events, idempotency
 from sqlalchemy.exc import IntegrityError
+from app.auth import require_api_key
+
 
 
 router=APIRouter()
@@ -30,7 +32,7 @@ def _replay_or_none(db:Session, request: schemas.TransferRequest):
     }
 
 
-@router.post("/transfers", response_model=schemas.TransferResponse)
+@router.post("/transfers", response_model=schemas.TransferResponse, dependencies=[Depends(require_api_key)])
 def create_transfer(request: schemas.TransferRequest, db: Session=Depends(get_db)):
     replay=_replay_or_none(db, request)
 

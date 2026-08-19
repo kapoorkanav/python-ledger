@@ -7,6 +7,7 @@ from app import models, schemas, idempotency
 from sqlalchemy import text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
+from app.auth import require_api_key
 
 router=APIRouter()
 
@@ -67,7 +68,7 @@ def get_account(account_id: uuid.UUID, db: Session=Depends(get_db)):
         "balance": balance
     }
 
-@router.post("/accounts/{account_id}/deposit", response_model=schemas.DepositResponse)
+@router.post("/accounts/{account_id}/deposit", response_model=schemas.DepositResponse, dependencies=[Depends(require_api_key)])
 def deposit(account_id: uuid.UUID, request: schemas.DepositRequest, db: Session=Depends(get_db)):
     account_leg=idempotency.entry_key(idempotency.DEPOSIT, request.idempotency_key, "credit")
     external_leg=idempotency.entry_key(idempotency.DEPOSIT, request.idempotency_key, "debit")
@@ -119,7 +120,7 @@ def deposit(account_id: uuid.UUID, request: schemas.DepositRequest, db: Session=
 
 
 
-@router.post("/accounts/{account_id}/withdraw", response_model=schemas.WithdrawalResponse)
+@router.post("/accounts/{account_id}/withdraw", response_model=schemas.WithdrawalResponse, dependencies=[Depends(require_api_key)])
 def withdraw(account_id: uuid.UUID, request: schemas.WithdrawalRequest, db: Session=Depends(get_db)):
     account_leg=idempotency.entry_key(idempotency.WITHDRAW, request.idempotency_key, "debit")
     external_leg=idempotency.entry_key(idempotency.WITHDRAW, request.idempotency_key, "credit")

@@ -13,6 +13,7 @@ TEST_DATABASE_URL = os.environ.get(
     "DATABASE_URL",
     "postgresql://ledger_user:ledger_pass@localhost:5432/ledger_db"
 )
+os.environ.setdefault("LEDGER_API_KEY", "test-secret-key")
 
 engine=create_engine(TEST_DATABASE_URL)
 TestingSessionLocal=sessionmaker(autocommit=False, autoflush=False, bind=engine, join_transaction_mode="create_savepoint")
@@ -36,7 +37,7 @@ def client(db_session):
         yield db_session
     app.dependency_overrides[get_db]=override_get_db
     try:
-        yield TestClient(app)
+        yield TestClient(app, headers={"X-API-Key": os.environ["LEDGER_API_KEY"]})
     finally:
         app.dependency_overrides.clear()
 
