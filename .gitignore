@@ -1,3 +1,10 @@
-/.venv
-/tests/__pycache__
-/app/__pycache__
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.env
+.pytest_cache/
+.hypothesis/
+.coverage
+htmlcov/
+.DS_Store
