@@ -35,3 +35,8 @@ class TransferRequest(BaseModel):
     to_account_id: uuid.UUID
     amount: int=Field(gt=0)
     idempotency_key: str
+
+class TransferResponse(BaseModel):
+    transfer_id: uuid.UUID
+    from_balance: int
+    to_balance: int

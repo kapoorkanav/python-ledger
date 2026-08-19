@@ -3,17 +3,39 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from app import crud
 from app.database import get_db
-from app import models, schemas
+from app import models, schemas, idempotency
+from sqlalchemy import text
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.exc import IntegrityError
 
 router=APIRouter()
 
-def get_or_create_external_account(db: Session)-> models.Account:
-    account=db.query(models.Account).filter(models.Account.name=="EXTERNAL").first()
-    if not account:
-        account=models.Account(name="EXTERNAL", currency="USD")
-        db.add(account)
-        db.flush()
-    return account
+EXTERNAL_ACCOUNT_PREFIX="EXTERNAL:"
+
+def get_or_create_external_account(db: Session, currency: str="USD")-> models.Account:
+    name=f"{EXTERNAL_ACCOUNT_PREFIX}{currency}"
+
+    db.execute(
+        pg_insert(models.Account)
+        .values(id=uuid.uuid4(), name=name, currency=currency)
+        .on_conflict_do_nothing(
+            index_elements=["name"],
+            index_where=text("name LIKE 'EXTERNAL:%'"),
+        )
+    )
+    db.flush()
+    return db.query(models.Account).filter(models.Account.name==name).one()
+
+def _replay_or_none(db: Session, entry_key: str, account_id: uuid.UUID, amount: int):
+    existing=crud.find_existing_ledger_entry(db, entry_key)
+    if existing is None:
+        return None
+    if existing.account_id!=account_id or existing.amount!=amount:
+        raise HTTPException(
+            status_code=409,
+            detail="Idempotency key already used with different parameters",
+        )
+    return {"account_id": account_id, "balance": crud.get_balance(db, account_id)}
 
 
 @router.post("/accounts", response_model=schemas.AccountOut, status_code=201)
@@ -35,7 +57,7 @@ def get_account(account_id: uuid.UUID, db: Session=Depends(get_db)):
     if not account:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Acount not found"
+            detail="Account not found"
         )
     balance=crud.get_balance(db, account_id)
     return {
@@ -47,87 +69,106 @@ def get_account(account_id: uuid.UUID, db: Session=Depends(get_db)):
 
 @router.post("/accounts/{account_id}/deposit", response_model=schemas.DepositResponse)
 def deposit(account_id: uuid.UUID, request: schemas.DepositRequest, db: Session=Depends(get_db)):
-    existing=crud.find_existing_ledger_entry(db, f"{request.idempotency_key}-out")
-    if existing:
-        return{
-            "account_id": account_id,
-            "balance": crud.get_balance(db, account_id),
-        }
-    account=db.query(models.Account).filter(models.Account.id==account_id).with_for_update().first()
-    existing=crud.find_existing_ledger_entry(db, f"{request.idempotency_key}-out")
-    if existing:
-        return{
-            "account_id": account_id,
-            "balance": crud.get_balance(db, account_id),
-        }
+    account_leg=idempotency.entry_key(idempotency.DEPOSIT, request.idempotency_key, "credit")
+    external_leg=idempotency.entry_key(idempotency.DEPOSIT, request.idempotency_key, "debit")
+
+    replay=_replay_or_none(db, account_leg, account_id, request.amount)
+
+    if replay:
+        return replay
+    
+    account=(
+        db.query(models.Account)
+        .filter(models.Account.id==account_id)
+        .with_for_update()
+        .first()
+    )
+    
     if not account:
         raise HTTPException(status_code=404, detail="Account not found")
-    
-    external=get_or_create_external_account(db)
-    transfer_id=uuid.uuid4()
 
-    debit_entry=models.LedgerEntry(
-        account_id=external.id,
-        transfer_id=transfer_id,
-        amount=request.amount,
-        direction="debit",
-        idempotency_key=f"{request.idempotency_key}-out",
-    )
+    replay=_replay_or_none(db, account_leg, account_id, request.amount)
 
-    credit_entry=models.LedgerEntry(
-        account_id=account_id,
-        transfer_id=transfer_id,
-        amount=request.amount,
-        direction="credit",
-        idempotency_key=f"{request.idempotency_key}-in",
-    )
-    db.add_all([debit_entry, credit_entry])
+    if replay:
+        return replay
+
+    external=get_or_create_external_account(db, account.currency)
+    operation_id=uuid.uuid4()
+
+    db.add_all([
+        models.LedgerEntry(
+            account_id=external.id, transfer_id=operation_id, amount=request.amount,
+            direction="debit", idempotency_key=external_leg,
+        ),
+        models.LedgerEntry(
+            account_id=account_id, transfer_id=operation_id, amount=request.amount,
+            direction="credit", idempotency_key=account_leg,
+        ),
+    ])
+
     db.flush()
-    balance=crud.get_balance(db, account.id)
-    db.commit()
-    return {"account_id": str(account.id), "balance": balance}
+    balance=crud.get_balance(db, account_id)
+
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Idempotency key is already in use")
+
+    return {"account_id": account_id, "balance": balance}
+
+
 
 @router.post("/accounts/{account_id}/withdraw", response_model=schemas.WithdrawalResponse)
 def withdraw(account_id: uuid.UUID, request: schemas.WithdrawalRequest, db: Session=Depends(get_db)):
-    existing=crud.find_existing_ledger_entry(db, f"{request.idempotency_key}-out")
-    if existing:
-        return{
-            "account_id": account_id,
-            "balance": crud.get_balance(db, account_id),
-        }
-    account=db.query(models.Account).filter(models.Account.id==account_id).with_for_update().first()
-    existing=crud.find_existing_ledger_entry(db, f"{request.idempotency_key}-out")
-    if existing:
-        return{
-            "account_id": account_id,
-            "balance": crud.get_balance(db, account_id),
-        }
+    account_leg=idempotency.entry_key(idempotency.WITHDRAW, request.idempotency_key, "debit")
+    external_leg=idempotency.entry_key(idempotency.WITHDRAW, request.idempotency_key, "credit")
+
+    replay=_replay_or_none(db, account_leg, account_id, request.amount)
+
+    if replay:
+        return replay
+
+    account=(
+        db.query(models.Account)
+        .filter(models.Account.id==account_id)
+        .with_for_update()
+        .first()
+    )
+
     if not account:
         raise HTTPException(status_code=404, detail="Account not found")
-    current_balance=crud.get_balance(db, account_id)
-    if current_balance<request.amount:
-        raise HTTPException(status_code=400, detail="Insufficient Balance")
-    external=get_or_create_external_account(db)
-    transfer_id=uuid.uuid4()
 
-    debit_entry=models.LedgerEntry(
-        account_id=account_id,
-        transfer_id=transfer_id,
-        amount=request.amount,
-        direction="debit",
-        idempotency_key=f"{request.idempotency_key}-out",
-    )
+    replay=_replay_or_none(db, account_leg, account_id, request.amount)
 
-    credit_entry=models.LedgerEntry(
-        account_id=external.id,
-        transfer_id=transfer_id,
-        amount=request.amount,
-        direction="credit",
-        idempotency_key=f"{request.idempotency_key}-in",
-    )
+    if replay:
+        return replay
 
-    db.add_all([debit_entry, credit_entry])
+    if crud.get_balance(db, account_id)<request.amount:
+        raise HTTPException(status_code=400, detail="Insufficient balance")
+
+    external=get_or_create_external_account(db, account.currency)
+
+    operation_id=uuid.uuid4()
+
+    db.add_all([
+        models.LedgerEntry(
+            account_id=account_id, transfer_id=operation_id, amount=request.amount,
+            direction="debit", idempotency_key=account_leg
+        ),
+        models.LedgerEntry(
+            account_id=external.id, transfer_id=operation_id, amount=request.amount,
+            direction="credit", idempotency_key=external_leg
+        ),
+    ])
     db.flush()
+
     balance=crud.get_balance(db, account_id)
-    db.commit()
-    return {"account_id": str(account.id), "balance": balance}
+
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Idempotency key already in use")
+
+    return {"account_id": account_id, "balance": balance}
