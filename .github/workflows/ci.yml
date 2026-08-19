@@ -1,89 +1,103 @@
 name: CI
 
 on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
+    push:
+        branches: [main]
+    pull_request:
+        branches: [main]
 
 jobs:
-  test:
-    runs-on: ubuntu-latest
-
-    services:
-      postgres:
-        image: postgres:16
+    test:
+        name: Unit and database tests
+        runs-on: ubuntu-latest
+        
+        services:
+            postgres:
+                image: postgres:16
+                env:
+                    POSTGRES_USER: ledger_user
+                    POSTGRES_PASSWORD: ledger_pass
+                    POSTGRES_DB: ledger_db
+                ports:
+                    - 5432:5432
+                options: >-
+                    --health-cmd pg_isready
+                    --health-interval 5s
+                    --health-timeout 5s
+                    --health-retries 5
         env:
-          POSTGRES_USER: ledger_user
-          POSTGRES_PASSWORD: ledger_pass
-          POSTGRES_DB: ledger_db
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 5
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+            DATABASE_URL: postgresql://ledger_user:ledger_pass@localhost:5432/ledger_db
+        
+        steps:
+            - uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
+            - uses: actions/setup-python@v5
+              with:
+                python-version: "3.11"
+                cache: pip
 
-      - name: Install dependencies
-        run: pip install -r requirements.txt
+            - name: Install dependencies
+              run: pip install -r requirements-dev.txt
 
-      - name: Run migrations
+            - name: Run migrations
+              run: alembic upgrade head
+
+            - name: Verify models and migrations agree
+              run: alembic check
+
+            - name: Run tests
+              run: pytest -v -m "not integration" --cov=app --cov-report=term-missing
+
+    integration-test:
+        name: Full-stack integration tests
+        needs: test
+        runs-on: ubuntu-latest
+
         env:
-          DATABASE_URL: postgresql://ledger_user:ledger_pass@localhost:5432/ledger_db
-        run: alembic upgrade head
+            DATABASE_URL: postgresql://ledger_user:ledger_pass@localhost:5432/ledger_db
+            KAFKA_BOOTSTRAP_SERVERS: localhost:9092
+            BASE_URL: http://localhost:8000
 
-      - name: Run tests
-        env:
-          DATABASE_URL: postgresql://ledger_user:ledger_pass@localhost:5432/ledger_db
-        run: pytest -v -m "not integration"
+        steps:
+            - uses: actions/checkout@v4
 
-  integration-test:
-    needs: test
-    runs-on: ubuntu-latest
+            - uses: actions/setup-python@v5
+              with:
+                python-version: "3.11"
+                cache: pip
 
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+            - name: Install dependencies
+              run: pip install -r requirements-dev.txt
 
-      - name: Start full stack
-        run: docker compose up -d --build
+            - name: Start full stack
+              run: docker compose up -d --build
 
-      - name: Wait for app to be ready
-        run: |
-          for i in {1..30}; do
-            if curl -fsS http://localhost:8000/ping; then
-              exit 0
-            fi
-            sleep 2
-          done          
-          echo "App did not become ready in time"
-          docker compose logs app
-          exit 1
+            - name: Wait for app to be ready
+              run: |
+                for i in $(seq 1 30); do
+                  if curl -fsS "$BASE_URL/health"; then exit 0; fi
+                  sleep 2
+                done
+                echo "App did not become ready in time"
+                exit 1
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
+            - name: Wait for outbox relay to be running
+              run: |
+                for i in $(seq 1 30); do
+                  state=$(docker compose ps -q outbox_relay | xargs -r docker inspect -f '{{.State.Running}}')
+                  if [ "$state" = "true" ]; then exit 0; fi
+                  sleep 2
+                done
+                echo "Outbox relay did not start in time"
+                exit 1
 
-      - name: Install dependencies
-        run: pip install -r requirements.txt
+            - name: Run integration tests
+              run: pytest -v -m integration
 
-      - name: Run integration tests
-        env:
-          DATABASE_URL: postgresql://ledger_user:ledger_pass@localhost:5432/ledger_db
-          BASE_URL: http://localhost:8000
-          KAFKA_BOOTSTRAP_SERVERS: localhost:9092
-        run: pytest -m integration -v
+            - name: Dump stack logs
+              if: failure()
+              run: docker compose logs --no-color
 
-      - name: Tear down
-        if: always()
-        run: docker compose down -v
+            - name: Tear down
+              if: always()
+              run: docker compose down -v
