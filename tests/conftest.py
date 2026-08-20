@@ -1,6 +1,7 @@
 import os
 import uuid
 import pytest
+import datetime
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -13,7 +14,7 @@ TEST_DATABASE_URL = os.environ.get(
     "DATABASE_URL",
     "postgresql://ledger_user:ledger_pass@localhost:5432/ledger_db"
 )
-os.environ.setdefault("LEDGER_API_KEY", "test-secret-key")
+os.environ.setdefault("LEDGER_API_KEY", "dev-secret-key")
 
 engine=create_engine(TEST_DATABASE_URL)
 TestingSessionLocal=sessionmaker(autocommit=False, autoflush=False, bind=engine, join_transaction_mode="create_savepoint")
