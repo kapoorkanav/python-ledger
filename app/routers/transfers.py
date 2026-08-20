@@ -124,3 +124,10 @@ def create_transfer(request: schemas.TransferRequest, db: Session=Depends(get_db
         "from_balance": final_from_balance,
         "to_balance": final_to_balance,
     }
+
+@router.get("/transfers/{transfer_id}", response_model=schemas.TransferOut)
+def get_transfer(transfer_id: uuid.UUID, db: Session=Depends(get_db)):
+    transfer=db.query(models.Transfer).filter(models.Transfer.id==transfer_id).first()
+    if not transfer:
+        raise HTTPException(status_code=404, detail="Transfer not found")
+    return transfer

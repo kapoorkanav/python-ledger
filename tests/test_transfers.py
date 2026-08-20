@@ -79,3 +79,21 @@ def test_transfer_rejects_non_positive_amount(client, account, key):
     alice, bob = account("Alice"), account("Bob")
     assert _transfer(client, alice, bob, 0, key("tx")).status_code == 422
     assert _transfer(client, alice, bob, -100, key("tx")).status_code == 422
+
+def test_get_transfer_by_id(client, account, key):
+    alice, bob = account("Alice"), account("Bob")
+    client.post(f"/accounts/{alice['id']}/deposit", json={"amount": 5000, "idempotency_key": key("dep")})
+    created = _transfer(client, alice, bob, 1000, key("tx")).json()
+
+    response = client.get(f"/transfers/{created['transfer_id']}")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["amount"] == 1000
+    assert data["from_account_id"] == alice["id"]
+    assert data["to_account_id"] == bob["id"]
+
+
+def test_get_unknown_transfer_404(client):
+    import uuid
+    assert client.get(f"/transfers/{uuid.uuid4()}").status_code == 404

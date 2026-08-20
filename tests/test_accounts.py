@@ -28,3 +28,20 @@ def test_get_unknown_account_404(client):
 def test_new_account_starts_at_zero(client, account):
     acc = account("Alice")
     assert client.get(f"/accounts/{acc['id']}").json()["balance"] == 0
+
+def test_list_entries_after_deposit(client, account, key):
+    acc = account("Alice")
+    client.post(f"/accounts/{acc['id']}/deposit", json={"amount": 5000, "idempotency_key": key("dep")})
+
+    response = client.get(f"/accounts/{acc['id']}/entries")
+
+    assert response.status_code == 200
+    entries = response.json()
+    assert len(entries) == 1
+    assert entries[0]["direction"] == "credit"
+    assert entries[0]["amount"] == 5000
+
+
+def test_list_entries_unknown_account_404(client):
+    import uuid
+    assert client.get(f"/accounts/{uuid.uuid4()}/entries").status_code == 404

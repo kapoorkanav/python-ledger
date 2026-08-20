@@ -173,3 +173,16 @@ def withdraw(account_id: uuid.UUID, request: schemas.WithdrawalRequest, db: Sess
         raise HTTPException(status_code=409, detail="Idempotency key already in use")
 
     return {"account_id": account_id, "balance": balance}
+
+@router.get("/accounts/{account_id}/entries", response_model=list[schemas.LedgerEntryOut])
+def list_entries(account_id: uuid.UUID, limit: int=100, db: Session=Depends(get_db)):
+    account=db.query(models.Account).filter(models.Account.id==account_id).first()
+    if not account:
+        raise HTTPException(status_code=404, detail="Account not found")
+    return (
+        db.query(models.LedgerEntry)
+        .filter(models.LedgerEntry.account_id == account_id)
+        .order_by(models.LedgerEntry.created_at.desc())
+        .limit(limit)
+        .all()
+    )

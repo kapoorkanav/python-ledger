@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime
 from pydantic import BaseModel, Field
 
 class AccountCreate(BaseModel):
@@ -40,3 +41,24 @@ class TransferResponse(BaseModel):
     transfer_id: uuid.UUID
     from_balance: int
     to_balance: int
+
+class LedgerEntryOut(BaseModel):
+    id: uuid.UUID
+    transfer_id: uuid.UUID
+    amount: int
+    direction: str
+    created_at: datetime
+
+    class Config:
+        from_attributes=True
+
+class TransferOut(BaseModel):
+    id: uuid.UUID
+    from_account_id: uuid.UUID
+    to_account_id: uuid.UUID
+    amount: int
+    status: str
+    created_at: datetime
+
+    class Config:
+        from_attributes=True
